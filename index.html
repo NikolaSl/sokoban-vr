@@ -1,0 +1,38 @@
+<!--
+  Copyright (c) 2026 Nikola Slavchev - LZ1NKL
+  Licensed under the MIT License. See LICENSE for details.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sokoban FPV 3D</title>
+    <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+    <div id="game-container"></div>
+    <div id="instructions">
+        <p>CLICK OR PRESS SPACE TO START</p>
+        <p>W,A,S,D or L/R MOUSE to MOVE</p>
+        <p>MOUSE to LOOK | TAB or MID MOUSE for MAP</p>
+        <p>U to UNDO | R to RESTART | 01-50 to SELECT</p>
+    </div>
+    <div id="map-overlay">
+        <canvas id="map-canvas"></canvas>
+    </div>
+
+    <!-- Libraries -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    
+    <!-- App scripts -->
+    <script type="module" src="src/main.js"></script>
+</body>
+</html>
