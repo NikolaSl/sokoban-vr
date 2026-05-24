@@ -30,6 +30,17 @@ body {
     cursor: pointer;
 }
 
+#instructions h1 {
+    margin: 0 0 8px;
+    color: #FFFFFF;
+    font-size: 32px;
+}
+
+#instructions .author {
+    margin: 0 0 20px;
+    color: #FF55FF;
+}
+
 #map-overlay {
     position: absolute;
     top: 0;
