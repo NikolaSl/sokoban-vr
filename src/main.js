@@ -428,11 +428,11 @@ function isMapVisible() {
 }
 
 function updateMapStatus() {
+    if (!mapStatus) return;
     mapStatus.textContent = `LEVEL ${currentLevel.toString().padStart(2, '0')}/${MAX_LEVELS} | MOVES ${stats.moves} | PUSHES ${stats.pushes} | ROTATIONS ${stats.rotations}`;
 }
 
 function renderMap() {
-    updateMapStatus();
     const cellSize = 20;
     mapCanvas.width = game.width * cellSize;
     mapCanvas.height = game.height * cellSize;
@@ -465,6 +465,8 @@ function renderMap() {
             }
         }
     }
+
+    updateMapStatus();
 }
 
 function drawMapPlayer(ctx, x, y, cellSize) {
