@@ -47,11 +47,22 @@ body {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.9);
+    background: rgba(0, 0, 0, 0.55);
     display: none;
+    flex-direction: column;
     justify-content: center;
     align-items: center;
     z-index: 20;
+}
+
+#map-status {
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.85);
+    border: 2px solid #55FFFF;
+    color: #FFFFFF;
+    font-weight: bold;
+    text-align: center;
 }
 
 #map-canvas {

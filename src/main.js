@@ -17,10 +17,13 @@ const MAX_LEVELS = 50;
 let levelInputBuffer = "";
 let levelInputTimeout = null;
 let isLevelCompleting = false;
+let stats = { moves: 0, pushes: 0, rotations: 0 };
+let moveStatsHistory = [];
 
 const instructions = document.getElementById('instructions');
 const mapOverlay = document.getElementById('map-overlay');
 const mapCanvas = document.getElementById('map-canvas');
+const mapStatus = document.getElementById('map-status');
 
 init();
 
@@ -113,6 +116,7 @@ async function loadCurrentLevel() {
     const levelStr = currentLevel.toString().padStart(2, '0');
     try {
         await game.loadLevel(`levels/level${levelStr}.txt`);
+        resetLevelStats();
         build3DLevel();
         resetPlayerPosition();
         isLevelCompleting = false;
@@ -186,6 +190,11 @@ function build3DLevel() {
 
 function resetPlayerPosition() {
     camera.position.set(game.playerPos.x * UNIT, 0, game.playerPos.y * UNIT);
+}
+
+function resetLevelStats() {
+    stats = { moves: 0, pushes: 0, rotations: 0 };
+    moveStatsHistory = [];
 }
 
 function onKeyDown(event) {
@@ -272,6 +281,7 @@ function onKeyDown(event) {
 function handleRotate(dir) {
     if (isMoving) return;
     isMoving = true;
+    stats.rotations++;
 
     const startRotation = camera.rotation.y;
     // Snap current rotation to nearest 90 before adding next 90
@@ -302,6 +312,11 @@ function handleUndo() {
     if (isMoving) return;
     const prevState = game.undo();
     if (prevState) {
+        const prevStats = moveStatsHistory.pop();
+        if (prevStats) {
+            stats.moves = prevStats.moves;
+            stats.pushes = prevStats.pushes;
+        }
         build3DLevel();
         resetPlayerPosition();
     }
@@ -316,6 +331,9 @@ function onKeyUp(event) {
 function handleMove(dx, dy) {
     const result = game.tryMove(dx, dy);
     if (result.moved) {
+        moveStatsHistory.push({ moves: stats.moves, pushes: stats.pushes });
+        stats.moves++;
+        if (result.pushedBox) stats.pushes++;
         isMoving = true;
         const targetPos = new THREE.Vector3(game.playerPos.x * UNIT, 0, game.playerPos.y * UNIT);
         
@@ -405,7 +423,16 @@ function hideMap() {
     mapOverlay.style.display = 'none';
 }
 
+function isMapVisible() {
+    return window.getComputedStyle(mapOverlay).display !== 'none';
+}
+
+function updateMapStatus() {
+    mapStatus.textContent = `LEVEL ${currentLevel.toString().padStart(2, '0')}/${MAX_LEVELS} | MOVES ${stats.moves} | PUSHES ${stats.pushes} | ROTATIONS ${stats.rotations}`;
+}
+
 function renderMap() {
+    updateMapStatus();
     const cellSize = 20;
     mapCanvas.width = game.width * cellSize;
     mapCanvas.height = game.height * cellSize;
@@ -480,4 +507,8 @@ function onWindowResize() {
 function animate() {
     requestAnimationFrame(animate);
     renderer.render(scene, camera);
+
+    if (isMapVisible()) {
+        renderMap();
+    }
 }
