@@ -1,4 +1,4 @@
-# Sokoban FPV 3D
+# Sokoban-VR
 
 A small browser-based first-person Sokoban game using Three.js.
 

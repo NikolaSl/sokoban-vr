@@ -18,16 +18,27 @@ function loadTexture(path) {
 }
 
 function createGridTexture(baseColor, gridColor) {
+    const size = 128;
     const canvas = document.createElement('canvas');
-    canvas.width = 16;
-    canvas.height = 16;
+    canvas.width = size;
+    canvas.height = size;
 
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = baseColor;
-    ctx.fillRect(0, 0, 16, 16);
+    ctx.fillRect(0, 0, size, size);
+
+    // Keep the old CGA grid feeling, but add a subtle beveled tile edge.
     ctx.fillStyle = gridColor;
-    ctx.fillRect(0, 0, 1, 16);
-    ctx.fillRect(0, 0, 16, 1);
+    ctx.fillRect(0, 0, 6, size);
+    ctx.fillRect(0, 0, size, 6);
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.fillRect(8, 8, size - 16, 4);
+    ctx.fillRect(8, 8, 4, size - 16);
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+    ctx.fillRect(8, size - 12, size - 16, 4);
+    ctx.fillRect(size - 12, 8, 4, size - 16);
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.magFilter = THREE.NearestFilter;

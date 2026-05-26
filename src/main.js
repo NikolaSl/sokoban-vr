@@ -19,6 +19,8 @@ let levelInputTimeout = null;
 let isLevelCompleting = false;
 let stats = { moves: 0, pushes: 0, rotations: 0 };
 let moveStatsHistory = [];
+let soundEnabled = localStorage.getItem('sokobanSound') !== 'off';
+let audioContext = null;
 
 const instructions = document.getElementById('instructions');
 const mapOverlay = document.getElementById('map-overlay');
@@ -44,6 +46,7 @@ async function init() {
     controls = new PointerLockControls(camera, document.body);
 
     instructions.addEventListener('click', () => {
+        initAudio();
         controls.lock();
     });
 
@@ -140,9 +143,9 @@ function build3DLevel() {
     const floorGeo = new THREE.PlaneGeometry(UNIT, UNIT);
     const goalGeo = new THREE.PlaneGeometry(UNIT * 0.5, UNIT * 0.5);
 
-    const wallMat = new THREE.MeshBasicMaterial({ map: Textures.wall, transparent: true });
-    const boxMat = new THREE.MeshBasicMaterial({ map: Textures.box, transparent: true });
-    const boxOnGoalMat = new THREE.MeshBasicMaterial({ map: Textures.boxOnGoal, transparent: true });
+    const wallMat = new THREE.MeshBasicMaterial({ map: Textures.wall });
+    const boxMat = new THREE.MeshBasicMaterial({ map: Textures.box });
+    const boxOnGoalMat = new THREE.MeshBasicMaterial({ map: Textures.boxOnGoal });
     const floorMat = new THREE.MeshBasicMaterial({ map: Textures.floor });
     const ceilMat = new THREE.MeshBasicMaterial({ map: Textures.ceiling });
     const goalMat = new THREE.MeshBasicMaterial({ map: Textures.goal, transparent: true });
@@ -197,6 +200,64 @@ function resetLevelStats() {
     moveStatsHistory = [];
 }
 
+function initAudio() {
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioContext.state === 'suspended') {
+        audioContext.resume();
+    }
+}
+
+function playTone(frequency, start, duration, volume = 0.04, type = 'square') {
+    if (!soundEnabled || !audioContext) return;
+
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    const now = audioContext.currentTime + start;
+
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, now);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(volume, now + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+    oscillator.start(now);
+    oscillator.stop(now + duration + 0.01);
+}
+
+function playSound(name) {
+    if (!soundEnabled) return;
+    initAudio();
+
+    if (name === 'move') {
+        playTone(520, 0, 0.035, 0.018);
+    } else if (name === 'push') {
+        playTone(165, 0, 0.055, 0.045);
+        playTone(220, 0.045, 0.06, 0.035);
+    } else if (name === 'blocked') {
+        playTone(90, 0, 0.08, 0.035, 'sawtooth');
+    } else if (name === 'rotate') {
+        playTone(260, 0, 0.04, 0.016);
+    } else if (name === 'undo') {
+        playTone(440, 0, 0.035, 0.025);
+        playTone(330, 0.04, 0.045, 0.025);
+    } else if (name === 'win') {
+        [523, 659, 784, 1047].forEach((freq, i) => playTone(freq, i * 0.08, 0.075, 0.035));
+    } else if (name === 'toggle') {
+        playTone(soundEnabled ? 880 : 220, 0, 0.06, 0.03);
+    }
+}
+
+function toggleSound() {
+    initAudio();
+    soundEnabled = !soundEnabled;
+    localStorage.setItem('sokobanSound', soundEnabled ? 'on' : 'off');
+    playSound('toggle');
+}
+
 function onKeyDown(event) {
     if (isLevelCompleting) return;
     
@@ -204,6 +265,7 @@ function onKeyDown(event) {
 
     if (event.code === 'Space' && !controls.isLocked) {
         event.preventDefault();
+        initAudio();
         controls.lock();
         return;
     }
@@ -221,6 +283,11 @@ function onKeyDown(event) {
 
     if (key === 'u') {
         handleUndo();
+        return;
+    }
+
+    if (key === 'o') {
+        toggleSound();
         return;
     }
 
@@ -282,6 +349,7 @@ function handleRotate(dir) {
     if (isMoving) return;
     isMoving = true;
     stats.rotations++;
+    playSound('rotate');
 
     const startRotation = camera.rotation.y;
     // Snap current rotation to nearest 90 before adding next 90
@@ -319,6 +387,7 @@ function handleUndo() {
         }
         build3DLevel();
         resetPlayerPosition();
+        playSound('undo');
     }
 }
 
@@ -334,6 +403,7 @@ function handleMove(dx, dy) {
         moveStatsHistory.push({ moves: stats.moves, pushes: stats.pushes });
         stats.moves++;
         if (result.pushedBox) stats.pushes++;
+        playSound(result.pushedBox ? 'push' : 'move');
         isMoving = true;
         const targetPos = new THREE.Vector3(game.playerPos.x * UNIT, 0, game.playerPos.y * UNIT);
         
@@ -350,6 +420,8 @@ function handleMove(dx, dy) {
         }
 
         animateMove(targetPos, boxMesh, boxTarget);
+    } else {
+        playSound('blocked');
     }
 }
 
@@ -380,6 +452,7 @@ function animateMove(targetPos, boxMesh, boxTarget) {
             }
             isMoving = false;
             if (game.isWin()) {
+                playSound('win');
                 startLevelCompleteEffect();
             }
         }
@@ -390,7 +463,7 @@ function animateMove(targetPos, boxMesh, boxTarget) {
 function startLevelCompleteEffect() {
     isLevelCompleting = true;
     let flashCount = 0;
-    const maxFlashes = 8;
+    const maxFlashes = 12;
     const flashInterval = 100;
 
     const interval = setInterval(() => {
@@ -429,7 +502,7 @@ function isMapVisible() {
 
 function updateMapStatus() {
     if (!mapStatus) return;
-    mapStatus.textContent = `LEVEL ${currentLevel.toString().padStart(2, '0')}/${MAX_LEVELS} | MOVES ${stats.moves} | PUSHES ${stats.pushes} | ROTATIONS ${stats.rotations}`;
+    mapStatus.textContent = `LEVEL ${currentLevel.toString().padStart(2, '0')}/${MAX_LEVELS} | MOVES ${stats.moves} | PUSHES ${stats.pushes} | ROTATIONS ${stats.rotations} | SOUND ${soundEnabled ? 'ON' : 'OFF'}`;
 }
 
 function renderMap() {
