@@ -10,11 +10,17 @@ The goal is also harder here: the player does not have the whole level state vis
 
 ## Run
 
+Play online: <https://nikolasl.github.io/sokoban-vr/>
+
+To run locally:
+
 ```bash
 python3 -m http.server 8000 --bind 127.0.0.1
 ```
 
 Open: <http://127.0.0.1:8000>
+
+To host on another web server, copy the whole directory structure to the web server folder. No build step is required.
 
 ## License
 
