@@ -72,3 +72,17 @@ body {
     max-height: 90vh;
 }
 
+
+#vr-controls {
+    cursor: default;
+}
+
+#vr-layout,
+#enter-vr {
+    padding: 10px 18px;
+    border: 2px solid #55FFFF;
+    background: #000;
+    color: #55FFFF;
+    font: inherit;
+    cursor: pointer;
+}

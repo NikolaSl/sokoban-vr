@@ -19,6 +19,16 @@
         <p>W,A,S,D or L/R MOUSE to MOVE</p>
         <p>MOUSE to LOOK | TAB or MID MOUSE for MAP</p>
         <p>U to UNDO | R to RESTART | O SOUND | 01-50 to SELECT</p>
+        <div id="vr-controls" hidden>
+            <label for="vr-layout">Quest controls</label>
+            <select id="vr-layout" aria-describedby="vr-layout-help">
+                <option value="two-stick">Two sticks</option>
+                <option value="right-hand">Right hand only</option>
+            </select>
+            <p id="vr-layout-help"></p>
+            <button id="enter-vr" type="button">Enter VR</button>
+        </div>
+        <p id="vr-status" role="status" hidden></p>
     </div>
     <div id="map-overlay">
         <div id="map-status"></div>

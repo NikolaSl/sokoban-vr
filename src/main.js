@@ -5,11 +5,13 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { Game, TILE } from './game.js';
 import { Textures } from './textures.js';
+import { createVR } from './vr.js';
 
 const UNIT = 2; // Size of each grid cell
 
 let scene, camera, renderer, controls;
-let game, levelGroup;
+let game, levelGroup, vr;
+let isLoading = false;
 let boxes = [];
 let isMoving = false;
 let currentLevel = 1;
@@ -45,7 +47,8 @@ async function init() {
     // 2. Controls
     controls = new PointerLockControls(camera, document.body);
 
-    instructions.addEventListener('click', () => {
+    instructions.addEventListener('click', event => {
+        if (renderer.xr.isPresenting || event.target.closest('#vr-controls')) return;
         initAudio();
         controls.lock();
     });
@@ -55,7 +58,7 @@ async function init() {
     });
 
     controls.addEventListener('unlock', () => {
-        instructions.style.display = 'block';
+        if (!renderer.xr.isPresenting) instructions.style.display = 'block';
     });
 
     // 3. Load Level
@@ -69,11 +72,33 @@ async function init() {
     window.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('resize', onWindowResize);
 
-    animate();
+    vr = createVR(renderer, scene, camera, {
+        prepare: initAudio,
+        enter() {
+            resetPlayerPosition();
+            hideMap();
+            instructions.style.display = 'none';
+        },
+        exit() {
+            resetPlayerPosition();
+            onWindowResize();
+            instructions.style.display = 'block';
+        },
+        move: moveAlong,
+        turn() {
+            stats.rotations++;
+            playSound('rotate');
+        },
+        undo: handleUndo,
+        restart: loadCurrentLevel,
+        renderMap,
+        canPlay: () => game?.width > 0 && !isMoving && !isLoading && !isLevelCompleting
+    });
+    renderer.setAnimationLoop(animate);
 }
 
 function onMouseDown(event) {
-    if (!controls.isLocked || isMoving) return;
+    if (!controls.isLocked || isMoving || isLoading || isLevelCompleting || renderer.xr.isPresenting) return;
 
     if (event.button === 0) { // Left: Forward
         triggerMove('forward');
@@ -96,45 +121,57 @@ function triggerMove(direction) {
     forward.y = 0;
     forward.normalize();
 
-    let moveDir = new THREE.Vector3(0, 0, 0);
-    if (direction === 'forward') {
-        moveDir.copy(forward);
-    } else if (direction === 'backward') {
-        moveDir.copy(forward).negate();
-    }
+    if (direction === 'backward') forward.negate();
+    moveAlong(forward);
+}
 
-    if (moveDir.lengthSq() > 0) {
-        let dx = 0, dy = 0;
-        if (Math.abs(moveDir.x) > Math.abs(moveDir.z)) {
-            dx = Math.sign(moveDir.x);
-        } else {
-            dy = Math.sign(moveDir.z);
-        }
-        handleMove(dx, dy);
+function moveAlong(direction) {
+    if (direction.lengthSq() === 0) return;
+    if (Math.abs(direction.x) > Math.abs(direction.z)) {
+        handleMove(Math.sign(direction.x), 0);
+    } else {
+        handleMove(0, Math.sign(direction.z));
     }
 }
 
-async function loadCurrentLevel() {
-    game = new Game();
-    const levelStr = currentLevel.toString().padStart(2, '0');
+async function loadCurrentLevel(level = currentLevel) {
+    if (isLoading) return;
+    isLoading = true;
     try {
-        await game.loadLevel(`levels/level${levelStr}.txt`);
+        const nextGame = new Game();
+        const levelStr = level.toString().padStart(2, '0');
+        await nextGame.loadLevel(`levels/level${levelStr}.txt`);
+        game = nextGame;
+        currentLevel = level;
         resetLevelStats();
         build3DLevel();
         resetPlayerPosition();
-        isLevelCompleting = false;
     } catch (e) {
         console.error("Error loading level:", e);
-        if (currentLevel > 1) {
-            alert("Level not found. Returning to Level 1.");
-            currentLevel = 1;
-            await loadCurrentLevel();
-        }
+    } finally {
+        isLoading = false;
+        isLevelCompleting = false;
     }
 }
 
 function build3DLevel() {
-    if (levelGroup) scene.remove(levelGroup);
+    if (levelGroup) {
+        scene.remove(levelGroup);
+        const geometries = new Set();
+        const materials = new Set();
+        levelGroup.traverse(object => {
+            if (!object.isMesh) return;
+            geometries.add(object.geometry);
+            materials.add(object.material);
+            if (object.isInstancedMesh) object.dispose();
+            if (object.userData.matNormal) {
+                materials.add(object.userData.matNormal);
+                materials.add(object.userData.matGoal);
+            }
+        });
+        geometries.forEach(geometry => geometry.dispose());
+        materials.forEach(material => material.dispose());
+    }
     levelGroup = new THREE.Group();
     boxes = [];
 
@@ -150,26 +187,18 @@ function build3DLevel() {
     const ceilMat = new THREE.MeshBasicMaterial({ map: Textures.ceiling });
     const goalMat = new THREE.MeshBasicMaterial({ map: Textures.goal, transparent: true });
 
+    const floors = [], ceilings = [], walls = [], goals = [];
     for (let y = 0; y < game.height; y++) {
         for (let x = 0; x < game.width; x++) {
             const tile = game.grid[y][x];
             const px = x * UNIT;
             const pz = y * UNIT;
 
-            const floor = new THREE.Mesh(floorGeo, floorMat);
-            floor.rotation.x = -Math.PI / 2;
-            floor.position.set(px, -UNIT/2, pz);
-            levelGroup.add(floor);
-
-            const ceil = new THREE.Mesh(floorGeo, ceilMat);
-            ceil.rotation.x = Math.PI / 2;
-            ceil.position.set(px, UNIT/2, pz);
-            levelGroup.add(ceil);
+            floors.push([px, -UNIT / 2, pz]);
+            ceilings.push([px, UNIT / 2, pz]);
 
             if (tile === TILE.WALL) {
-                const wall = new THREE.Mesh(wallGeo, wallMat);
-                wall.position.set(px, 0, pz);
-                levelGroup.add(wall);
+                walls.push([px, 0, pz]);
             } else if (tile === TILE.BOX || tile === TILE.BOX_ON_GOAL) {
                 const mat = tile === TILE.BOX_ON_GOAL ? boxOnGoalMat : boxMat;
                 const box = new THREE.Mesh(boxGeo, mat);
@@ -180,19 +209,39 @@ function build3DLevel() {
             }
 
             if (tile === TILE.GOAL || tile === TILE.BOX_ON_GOAL || tile === TILE.PLAYER_ON_GOAL) {
-                const goal = new THREE.Mesh(goalGeo, goalMat);
-                goal.rotation.x = -Math.PI / 2;
-                goal.position.set(px, -UNIT/2 + 0.01, pz);
-                levelGroup.add(goal);
+                goals.push([px, -UNIT / 2 + 0.01, pz]);
             }
         }
+    }
+
+    addTiles(floorGeo, floorMat, floors, -Math.PI / 2);
+    addTiles(floorGeo, ceilMat, ceilings, Math.PI / 2);
+    addTiles(wallGeo, wallMat, walls, 0);
+    addTiles(goalGeo, goalMat, goals, -Math.PI / 2);
+    if (!boxes.length) {
+        boxGeo.dispose();
+        boxMat.dispose();
+        boxOnGoalMat.dispose();
+    }
+
+    function addTiles(geometry, material, positions, rotation) {
+        const mesh = new THREE.InstancedMesh(geometry, material, positions.length);
+        const matrix = new THREE.Matrix4().makeRotationX(rotation);
+        positions.forEach(([x, y, z], index) => {
+            mesh.setMatrixAt(index, matrix.setPosition(x, y, z));
+        });
+        levelGroup.add(mesh);
     }
 
     scene.add(levelGroup);
 }
 
 function resetPlayerPosition() {
-    camera.position.set(game.playerPos.x * UNIT, 0, game.playerPos.y * UNIT);
+    if (!game) return;
+    const x = game.playerPos.x * UNIT;
+    const z = game.playerPos.y * UNIT;
+    if (renderer.xr.isPresenting) vr.setTile(x, z);
+    else camera.position.set(x, 0, z);
 }
 
 function resetLevelStats() {
@@ -259,7 +308,8 @@ function toggleSound() {
 }
 
 function onKeyDown(event) {
-    if (isLevelCompleting) return;
+    if (isLevelCompleting || isLoading || renderer.xr.isPresenting) return;
+    if (event.target?.closest?.('#vr-controls')) return;
     
     const key = event.key.toLowerCase();
 
@@ -277,7 +327,7 @@ function onKeyDown(event) {
     }
 
     if (key === 'r') {
-        loadCurrentLevel();
+        if (!isMoving) loadCurrentLevel();
         return;
     }
 
@@ -292,15 +342,14 @@ function onKeyDown(event) {
     }
 
     // Two-digit level selection
-    if (event.key >= '0' && event.key <= '9') {
+    if (!isMoving && event.key >= '0' && event.key <= '9') {
         levelInputBuffer += event.key;
         if (levelInputTimeout) clearTimeout(levelInputTimeout);
         
         if (levelInputBuffer.length === 2) {
             const levelNum = parseInt(levelInputBuffer);
             if (levelNum > 0 && levelNum <= MAX_LEVELS) {
-                currentLevel = levelNum;
-                loadCurrentLevel();
+                loadCurrentLevel(levelNum);
             }
             levelInputBuffer = "";
         } else {
@@ -360,6 +409,10 @@ function handleRotate(dir) {
     const duration = 200; // ms
 
     function step() {
+        if (renderer.xr.isPresenting) {
+            isMoving = false;
+            return;
+        }
         const now = performance.now();
         const t = Math.min(1, (now - startTime) / duration);
         const ease = t; 
@@ -377,7 +430,7 @@ function handleRotate(dir) {
 }
 
 function handleUndo() {
-    if (isMoving) return;
+    if (isMoving || isLoading || isLevelCompleting || !game) return;
     const prevState = game.undo();
     if (prevState) {
         const prevStats = moveStatsHistory.pop();
@@ -398,6 +451,7 @@ function onKeyUp(event) {
 }
 
 function handleMove(dx, dy) {
+    if (!game || isMoving || isLoading || isLevelCompleting) return;
     const result = game.tryMove(dx, dy);
     if (result.moved) {
         moveStatsHistory.push({ moves: stats.moves, pushes: stats.pushes });
@@ -419,7 +473,12 @@ function handleMove(dx, dy) {
             }
         }
 
-        animateMove(targetPos, boxMesh, boxTarget);
+        if (renderer.xr.isPresenting) {
+            vr.setTile(targetPos.x, targetPos.z);
+            finishMove(boxMesh, boxTarget);
+        } else {
+            animateMove(targetPos, boxMesh, boxTarget);
+        }
     } else {
         playSound('blocked');
     }
@@ -431,6 +490,11 @@ function animateMove(targetPos, boxMesh, boxTarget) {
     const duration = 200; // ms
 
     function step() {
+        if (renderer.xr.isPresenting) {
+            vr.setTile(targetPos.x, targetPos.z);
+            finishMove(boxMesh, boxTarget);
+            return;
+        }
         const now = performance.now();
         const t = Math.min(1, (now - startTime) / duration);
         const ease = t; 
@@ -445,19 +509,23 @@ function animateMove(targetPos, boxMesh, boxTarget) {
             requestAnimationFrame(step);
         } else {
             camera.position.copy(targetPos);
-            if (boxMesh) {
-                boxMesh.position.copy(boxTarget);
-                const tile = game.getTile(boxMesh.userData.gridX, boxMesh.userData.gridY);
-                boxMesh.material = (tile === TILE.BOX_ON_GOAL) ? boxMesh.userData.matGoal : boxMesh.userData.matNormal;
-            }
-            isMoving = false;
-            if (game.isWin()) {
-                playSound('win');
-                startLevelCompleteEffect();
-            }
+            finishMove(boxMesh, boxTarget);
         }
     }
     requestAnimationFrame(step);
+}
+
+function finishMove(boxMesh, boxTarget) {
+    if (boxMesh) {
+        boxMesh.position.copy(boxTarget);
+        const tile = game.getTile(boxMesh.userData.gridX, boxMesh.userData.gridY);
+        boxMesh.material = tile === TILE.BOX_ON_GOAL ? boxMesh.userData.matGoal : boxMesh.userData.matNormal;
+    }
+    isMoving = false;
+    if (game.isWin()) {
+        playSound('win');
+        startLevelCompleteEffect();
+    }
 }
 
 function startLevelCompleteEffect() {
@@ -480,8 +548,7 @@ function startLevelCompleteEffect() {
             clearInterval(interval);
             boxes.forEach(box => box.material = box.userData.matGoal);
             setTimeout(() => {
-                currentLevel++;
-                loadCurrentLevel();
+                loadCurrentLevel(currentLevel % MAX_LEVELS + 1);
             }, 500);
         }
     }, flashInterval);
@@ -505,10 +572,15 @@ function updateMapStatus() {
     mapStatus.textContent = `LEVEL ${currentLevel.toString().padStart(2, '0')}/${MAX_LEVELS} | MOVES ${stats.moves} | PUSHES ${stats.pushes} | ROTATIONS ${stats.rotations} | SOUND ${soundEnabled ? 'ON' : 'OFF'}`;
 }
 
-function renderMap() {
+function renderMap(forward) {
+    if (!game) return mapCanvas;
     const cellSize = 20;
-    mapCanvas.width = game.width * cellSize;
-    mapCanvas.height = game.height * cellSize;
+    const width = game.width * cellSize;
+    const height = game.height * cellSize;
+    if (mapCanvas.width !== width || mapCanvas.height !== height) {
+        mapCanvas.width = width;
+        mapCanvas.height = height;
+    }
     const ctx = mapCanvas.getContext('2d');
 
     ctx.fillStyle = '#55FFFF'; // Cyan floor
@@ -534,15 +606,16 @@ function renderMap() {
             }
 
             if (tile === TILE.PLAYER || tile === TILE.PLAYER_ON_GOAL) {
-                drawMapPlayer(ctx, x, y, cellSize);
+                drawMapPlayer(ctx, x, y, cellSize, forward);
             }
         }
     }
 
     updateMapStatus();
+    return mapCanvas;
 }
 
-function drawMapPlayer(ctx, x, y, cellSize) {
+function drawMapPlayer(ctx, x, y, cellSize, forward = camera.getWorldDirection(new THREE.Vector3())) {
     const left = x * cellSize;
     const top = y * cellSize;
     const centerX = left + cellSize / 2;
@@ -550,11 +623,6 @@ function drawMapPlayer(ctx, x, y, cellSize) {
 
     ctx.fillStyle = '#000000';
     ctx.fillRect(left, top, cellSize - 1, cellSize - 1);
-
-    const forward = new THREE.Vector3();
-    camera.getWorldDirection(forward);
-    forward.y = 0;
-    forward.normalize();
 
     let dx = 0, dy = 0;
     if (Math.abs(forward.x) > Math.abs(forward.z)) {
@@ -574,16 +642,17 @@ function drawMapPlayer(ctx, x, y, cellSize) {
 }
 
 function onWindowResize() {
+    if (renderer.xr.isPresenting) return;
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-function animate() {
-    requestAnimationFrame(animate);
+function animate(time, frame) {
+    if (frame) vr.update(frame);
     renderer.render(scene, camera);
 
-    if (isMapVisible()) {
+    if (!frame && isMapVisible()) {
         renderMap();
     }
 }

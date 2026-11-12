@@ -22,8 +22,9 @@ export class Game {
 
     async loadLevel(url) {
         const response = await fetch(url);
+        if (!response.ok) throw new Error(`Could not load ${url} (HTTP ${response.status})`);
         const text = await response.text();
-        const lines = text.split('\n');
+        const lines = text.replace(/\r?\n$/, '').split(/\r?\n/);
         
         this.height = lines.length;
         this.width = Math.max(...lines.map(l => l.length));

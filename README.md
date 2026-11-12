@@ -1,6 +1,6 @@
 # Sokoban-VR
 
-A small browser-based first-person Sokoban game using Three.js.
+A small browser-based first-person Sokoban game using Three.js, with an immersive WebXR mode for Meta Quest.
 
 ## Motivation
 
@@ -21,6 +21,24 @@ python3 -m http.server 8000 --bind 127.0.0.1
 Open: <http://127.0.0.1:8000>
 
 To host on another web server, copy the whole directory structure to the web server folder. No build step is required.
+
+### Meta Quest 3
+
+Serve this branch over HTTPS. Open the page directly in Meta Quest Browser and select **Enter VR** with a Touch controller. For local headset development, an HTTPS server with a certificate trusted by the headset works. For USB testing with developer mode enabled, run the local server above, run `adb reverse tcp:8000 tcp:8000` on the computer, then open `http://localhost:8000` in the headset browser.
+
+Choose a **Quest controls** layout before selecting **Enter VR**. The game remembers your choice.
+
+| Action | Two sticks (default) | Right hand only |
+| --- | --- | --- |
+| Move one tile | Left stick in any direction | Right trigger forward, right grip backward |
+| Snap turn 90° | Right stick left/right | Right stick left/right |
+| Toggle map | A | A |
+| Undo | B | B |
+| Restart level | X | Click the right stick |
+
+Movement is relative to where you face. Move into a crate to push it. Release the input before the next step.
+
+Start seated or standing in place. The game centers the starting view when you enter VR. Use the controller to cross tiles.
 
 ## License
 
