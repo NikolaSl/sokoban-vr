@@ -5,15 +5,20 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { Game, TILE } from './game.js';
 import { Textures } from './textures.js';
-import { createVR } from './vr.js';
+import { createVR } from './vr.js?v=smooth-motion';
 
 const UNIT = 2; // Size of each grid cell
+const FLOOR_Y = -1;
+const CEILING_Y = 1.65;
+const EYE_Y = FLOOR_Y + 1.75;
+const CRATE_HEIGHT = 1.3;
+const CRATE_Y = FLOOR_Y + CRATE_HEIGHT / 2;
 
 let scene, camera, renderer, controls;
 let game, levelGroup, vr;
 let isLoading = false;
 let boxes = [];
-let isMoving = false;
+let motion = null;
 let currentLevel = 1;
 const MAX_LEVELS = 50;
 let levelInputBuffer = "";
@@ -75,30 +80,29 @@ async function init() {
     vr = createVR(renderer, scene, camera, {
         prepare: initAudio,
         enter() {
+            updateMotion(Infinity);
             resetPlayerPosition();
             hideMap();
             instructions.style.display = 'none';
         },
         exit() {
+            updateMotion(Infinity);
             resetPlayerPosition();
             onWindowResize();
             instructions.style.display = 'block';
         },
         move: moveAlong,
-        turn() {
-            stats.rotations++;
-            playSound('rotate');
-        },
+        turn: handleRotate,
         undo: handleUndo,
         restart: loadCurrentLevel,
         renderMap,
-        canPlay: () => game?.width > 0 && !isMoving && !isLoading && !isLevelCompleting
+        canPlay: () => game?.width > 0 && !motion && !isLoading && !isLevelCompleting
     });
     renderer.setAnimationLoop(animate);
 }
 
 function onMouseDown(event) {
-    if (!controls.isLocked || isMoving || isLoading || isLevelCompleting || renderer.xr.isPresenting) return;
+    if (!controls.isLocked || motion || isLoading || isLevelCompleting || renderer.xr.isPresenting) return;
 
     if (event.button === 0) { // Left: Forward
         triggerMove('forward');
@@ -175,8 +179,8 @@ function build3DLevel() {
     levelGroup = new THREE.Group();
     boxes = [];
 
-    const wallGeo = new THREE.BoxGeometry(UNIT, UNIT, UNIT);
-    const boxGeo = new THREE.BoxGeometry(UNIT * 0.8, UNIT * 0.8, UNIT * 0.8);
+    const wallGeo = new THREE.BoxGeometry(UNIT, CEILING_Y - FLOOR_Y, UNIT);
+    const boxGeo = new THREE.BoxGeometry(UNIT * 0.8, CRATE_HEIGHT, UNIT * 0.8);
     const floorGeo = new THREE.PlaneGeometry(UNIT, UNIT);
     const goalGeo = new THREE.PlaneGeometry(UNIT * 0.5, UNIT * 0.5);
 
@@ -194,22 +198,22 @@ function build3DLevel() {
             const px = x * UNIT;
             const pz = y * UNIT;
 
-            floors.push([px, -UNIT / 2, pz]);
-            ceilings.push([px, UNIT / 2, pz]);
+            floors.push([px, FLOOR_Y, pz]);
+            ceilings.push([px, CEILING_Y, pz]);
 
             if (tile === TILE.WALL) {
-                walls.push([px, 0, pz]);
+                walls.push([px, (FLOOR_Y + CEILING_Y) / 2, pz]);
             } else if (tile === TILE.BOX || tile === TILE.BOX_ON_GOAL) {
                 const mat = tile === TILE.BOX_ON_GOAL ? boxOnGoalMat : boxMat;
                 const box = new THREE.Mesh(boxGeo, mat);
-                box.position.set(px, -UNIT * 0.1, pz);
+                box.position.set(px, CRATE_Y, pz);
                 box.userData = { gridX: x, gridY: y, matNormal: boxMat, matGoal: boxOnGoalMat };
                 levelGroup.add(box);
                 boxes.push(box);
             }
 
             if (tile === TILE.GOAL || tile === TILE.BOX_ON_GOAL || tile === TILE.PLAYER_ON_GOAL) {
-                goals.push([px, -UNIT / 2 + 0.01, pz]);
+                goals.push([px, FLOOR_Y + 0.01, pz]);
             }
         }
     }
@@ -240,8 +244,8 @@ function resetPlayerPosition() {
     if (!game) return;
     const x = game.playerPos.x * UNIT;
     const z = game.playerPos.y * UNIT;
-    if (renderer.xr.isPresenting) vr.setTile(x, z);
-    else camera.position.set(x, 0, z);
+    if (renderer.xr.isPresenting) vr.setTile(x, EYE_Y, z);
+    else camera.position.set(x, EYE_Y, z);
 }
 
 function resetLevelStats() {
@@ -327,7 +331,7 @@ function onKeyDown(event) {
     }
 
     if (key === 'r') {
-        if (!isMoving) loadCurrentLevel();
+        if (!motion) loadCurrentLevel();
         return;
     }
 
@@ -342,7 +346,7 @@ function onKeyDown(event) {
     }
 
     // Two-digit level selection
-    if (!isMoving && event.key >= '0' && event.key <= '9') {
+    if (!motion && event.key >= '0' && event.key <= '9') {
         levelInputBuffer += event.key;
         if (levelInputTimeout) clearTimeout(levelInputTimeout);
         
@@ -360,7 +364,7 @@ function onKeyDown(event) {
         return;
     }
 
-    if (!controls.isLocked || isMoving) return;
+    if (!controls.isLocked || motion) return;
 
     let dx = 0, dy = 0;
 
@@ -394,43 +398,45 @@ function onKeyDown(event) {
     }
 }
 
+function startMotion(duration, apply, finish) {
+    motion = { start: performance.now(), duration, apply, finish };
+}
+
+function updateMotion(time) {
+    if (!motion) return;
+    const { start, duration, apply, finish } = motion;
+    const progress = THREE.MathUtils.clamp((time - start) / duration, 0, 1);
+    apply(THREE.MathUtils.smoothstep(progress, 0, 1));
+    if (progress === 1) {
+        motion = null;
+        finish?.();
+    }
+}
+
 function handleRotate(dir) {
-    if (isMoving) return;
-    isMoving = true;
+    if (motion) return;
     stats.rotations++;
     playSound('rotate');
 
-    const startRotation = camera.rotation.y;
-    // Snap current rotation to nearest 90 before adding next 90
-    const snappedStart = Math.round(startRotation / (Math.PI / 2)) * (Math.PI / 2);
-    const targetRotation = snappedStart + (dir * Math.PI / 2);
-
-    const startTime = performance.now();
-    const duration = 200; // ms
-
-    function step() {
-        if (renderer.xr.isPresenting) {
-            isMoving = false;
-            return;
-        }
-        const now = performance.now();
-        const t = Math.min(1, (now - startTime) / duration);
-        const ease = t; 
-
-        camera.rotation.y = THREE.MathUtils.lerp(snappedStart, targetRotation, ease);
-
-        if (t < 1) {
-            requestAnimationFrame(step);
-        } else {
-            camera.rotation.y = targetRotation;
-            isMoving = false;
-        }
+    const quarterTurn = Math.PI / 2;
+    if (renderer.xr.isPresenting) {
+        let previousAngle = 0;
+        startMotion(240, progress => {
+            const angle = dir * quarterTurn * progress;
+            vr.rotateBy(angle - previousAngle);
+            previousAngle = angle;
+        });
+    } else {
+        const start = camera.rotation.y;
+        const target = (Math.round(start / quarterTurn) + dir) * quarterTurn;
+        startMotion(240, progress => {
+            camera.rotation.y = THREE.MathUtils.lerp(start, target, progress);
+        });
     }
-    requestAnimationFrame(step);
 }
 
 function handleUndo() {
-    if (isMoving || isLoading || isLevelCompleting || !game) return;
+    if (motion || isLoading || isLevelCompleting || !game) return;
     const prevState = game.undo();
     if (prevState) {
         const prevStats = moveStatsHistory.pop();
@@ -451,15 +457,15 @@ function onKeyUp(event) {
 }
 
 function handleMove(dx, dy) {
-    if (!game || isMoving || isLoading || isLevelCompleting) return;
+    if (!game || motion || isLoading || isLevelCompleting) return;
     const result = game.tryMove(dx, dy);
     if (result.moved) {
         moveStatsHistory.push({ moves: stats.moves, pushes: stats.pushes });
         stats.moves++;
         if (result.pushedBox) stats.pushes++;
         playSound(result.pushedBox ? 'push' : 'move');
-        isMoving = true;
-        const targetPos = new THREE.Vector3(game.playerPos.x * UNIT, 0, game.playerPos.y * UNIT);
+        const targetPos = new THREE.Vector3(game.playerPos.x * UNIT, EYE_Y, game.playerPos.y * UNIT);
+        const startPos = new THREE.Vector3(targetPos.x - dx * UNIT, EYE_Y, targetPos.z - dy * UNIT);
         
         let boxMesh = null;
         let boxTarget = null;
@@ -469,50 +475,26 @@ function handleMove(dx, dy) {
             if (boxMesh) {
                 boxMesh.userData.gridX = result.boxTo.x;
                 boxMesh.userData.gridY = result.boxTo.y;
-                boxTarget = new THREE.Vector3(result.boxTo.x * UNIT, -UNIT * 0.1, result.boxTo.y * UNIT);
+                boxTarget = new THREE.Vector3(result.boxTo.x * UNIT, CRATE_Y, result.boxTo.y * UNIT);
             }
         }
 
-        if (renderer.xr.isPresenting) {
-            vr.setTile(targetPos.x, targetPos.z);
-            finishMove(boxMesh, boxTarget);
-        } else {
-            animateMove(targetPos, boxMesh, boxTarget);
-        }
+        animateMove(startPos, targetPos, boxMesh, boxTarget);
     } else {
         playSound('blocked');
     }
 }
 
-function animateMove(targetPos, boxMesh, boxTarget) {
-    const startPos = camera.position.clone();
-    const startTime = performance.now();
-    const duration = 200; // ms
-
-    function step() {
-        if (renderer.xr.isPresenting) {
-            vr.setTile(targetPos.x, targetPos.z);
-            finishMove(boxMesh, boxTarget);
-            return;
-        }
-        const now = performance.now();
-        const t = Math.min(1, (now - startTime) / duration);
-        const ease = t; 
-
-        camera.position.lerpVectors(startPos, targetPos, ease);
-        if (boxMesh && boxTarget) {
-            boxMesh.position.x = THREE.MathUtils.lerp(boxMesh.position.x, boxTarget.x, ease);
-            boxMesh.position.z = THREE.MathUtils.lerp(boxMesh.position.z, boxTarget.z, ease);
-        }
-
-        if (t < 1) {
-            requestAnimationFrame(step);
-        } else {
-            camera.position.copy(targetPos);
-            finishMove(boxMesh, boxTarget);
-        }
-    }
-    requestAnimationFrame(step);
+function animateMove(startPos, targetPos, boxMesh, boxTarget) {
+    const isVR = renderer.xr.isPresenting;
+    const boxStart = boxMesh?.position.clone();
+    const position = new THREE.Vector3();
+    startMotion(260, progress => {
+        position.lerpVectors(startPos, targetPos, progress);
+        if (isVR) vr.setTile(position.x, position.y, position.z);
+        else camera.position.copy(position);
+        if (boxMesh) boxMesh.position.lerpVectors(boxStart, boxTarget, progress);
+    }, () => finishMove(boxMesh, boxTarget));
 }
 
 function finishMove(boxMesh, boxTarget) {
@@ -521,7 +503,6 @@ function finishMove(boxMesh, boxTarget) {
         const tile = game.getTile(boxMesh.userData.gridX, boxMesh.userData.gridY);
         boxMesh.material = tile === TILE.BOX_ON_GOAL ? boxMesh.userData.matGoal : boxMesh.userData.matNormal;
     }
-    isMoving = false;
     if (game.isWin()) {
         playSound('win');
         startLevelCompleteEffect();
@@ -650,6 +631,7 @@ function onWindowResize() {
 
 function animate(time, frame) {
     if (frame) vr.update(frame);
+    updateMotion(time);
     renderer.render(scene, camera);
 
     if (!frame && isMapVisible()) {

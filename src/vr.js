@@ -127,20 +127,18 @@ export function createVR(renderer, scene, camera, actions) {
         rig.position.copy(tile).sub(offset.copy(origin).applyQuaternion(rig.quaternion));
     }
 
-    function setTile(x, z) {
-        tile.set(x, 0, z);
+    function setTile(x, y, z) {
+        tile.set(x, y, z);
         positionRig();
     }
 
-    function snapTurn(direction) {
+    function rotateBy(angle) {
         // Pivot around the viewer's horizontal position, including when leaning.
         pivot.copy(head).applyQuaternion(rig.quaternion).add(rig.position);
-        const angle = direction * Math.PI / 2;
         rig.rotateY(angle);
         heading.applyAxisAngle(UP, angle);
         rig.position.copy(pivot).sub(offset.copy(head).applyQuaternion(rig.quaternion));
         origin.copy(tile).sub(rig.position).applyQuaternion(inverseRotation.copy(rig.quaternion).invert());
-        actions.turn();
     }
 
     function update(frame) {
@@ -209,7 +207,7 @@ export function createVR(renderer, scene, camera, actions) {
             if (firstPressed) map.visible = !map.visible;
             if (secondPressed) actions.undo();
             else if (stickClicked) actions.restart();
-            else if (stickPressed) snapTurn(-Math.sign(x));
+            else if (stickPressed) actions.turn(-Math.sign(x));
             else if (triggerPressed !== gripPressed) {
                 const direction = forward.copy(getHeading());
                 if (gripPressed) direction.negate();
@@ -250,5 +248,5 @@ export function createVR(renderer, scene, camera, actions) {
         map.position.copy(head).add(forward).applyQuaternion(rig.quaternion).add(rig.position);
     }
 
-    return { setTile, update };
+    return { setTile, rotateBy, update };
 }
