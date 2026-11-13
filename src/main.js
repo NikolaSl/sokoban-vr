@@ -407,6 +407,16 @@ function smoothProgress(progress) {
     return THREE.MathUtils.smoothstep(progress, 0, 1);
 }
 
+function turnProgress(progress) {
+    const ramp = 0.3;
+    const cruiseSpeed = 1 / (1 - ramp);
+    // Integrate a cosine speed ramp so velocity and acceleration ease into the turn.
+    const edge = Math.min(progress, 1 - progress);
+    if (edge >= ramp) return (progress - ramp / 2) * cruiseSpeed;
+    const distance = (edge - ramp / Math.PI * Math.sin(Math.PI * edge / ramp)) * cruiseSpeed / 2;
+    return progress <= 0.5 ? distance : 1 - distance;
+}
+
 function updateMotion(time) {
     if (!motion) return;
     const { start, duration, apply, finish, ease } = motion;
@@ -430,7 +440,7 @@ function handleRotate(dir) {
             const angle = dir * quarterTurn * progress;
             vr.rotateBy(angle - previousAngle);
             previousAngle = angle;
-        });
+        }, undefined, turnProgress);
     } else {
         const start = camera.rotation.y;
         const target = (Math.round(start / quarterTurn) + dir) * quarterTurn;
