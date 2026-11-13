@@ -436,7 +436,7 @@ function handleRotate(dir) {
     const quarterTurn = Math.PI / 2;
     if (renderer.xr.isPresenting) {
         let previousAngle = 0;
-        startMotion(500, progress => {
+        startMotion(1000, progress => {
             const angle = dir * quarterTurn * progress;
             vr.rotateBy(angle - previousAngle);
             previousAngle = angle;

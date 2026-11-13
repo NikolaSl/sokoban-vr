@@ -31,7 +31,7 @@ Choose a **Quest controls** layout before selecting **Enter VR**. The game remem
 | Action | Two sticks (default) | Right hand only |
 | --- | --- | --- |
 | Move | Left stick in any direction | Right trigger forward, right grip backward |
-| Smooth turn 90° (500 ms) | Right stick left/right | Right stick left/right |
+| Smooth turn 90° (1 s) | Right stick left/right | Right stick left/right |
 | Toggle map | A | A |
 | Undo | B | B |
 | Restart level | X | Click the right stick |
