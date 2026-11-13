@@ -5,13 +5,14 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { Game, TILE } from './game.js';
 import { Textures } from './textures.js';
-import { createVR } from './vr.js?v=smooth-motion';
+import { createVR } from './vr.js?v=hold-walk';
 
 const UNIT = 2; // Size of each grid cell
 const FLOOR_Y = -1;
 const CEILING_Y = 1.65;
 const EYE_Y = FLOOR_Y + 1.75;
 const CRATE_HEIGHT = 1.3;
+const WALK_MS = 260;
 const CRATE_Y = FLOOR_Y + CRATE_HEIGHT / 2;
 
 let scene, camera, renderer, controls;
@@ -129,12 +130,12 @@ function triggerMove(direction) {
     moveAlong(forward);
 }
 
-function moveAlong(direction) {
+function moveAlong(direction, allowPush = true) {
     if (direction.lengthSq() === 0) return;
     if (Math.abs(direction.x) > Math.abs(direction.z)) {
-        handleMove(Math.sign(direction.x), 0);
+        return handleMove(Math.sign(direction.x), 0, allowPush);
     } else {
-        handleMove(0, Math.sign(direction.z));
+        return handleMove(0, Math.sign(direction.z), allowPush);
     }
 }
 
@@ -398,15 +399,19 @@ function onKeyDown(event) {
     }
 }
 
-function startMotion(duration, apply, finish) {
-    motion = { start: performance.now(), duration, apply, finish };
+function startMotion(duration, apply, finish, ease = smoothProgress) {
+    motion = { start: performance.now(), duration, apply, finish, ease };
+}
+
+function smoothProgress(progress) {
+    return THREE.MathUtils.smoothstep(progress, 0, 1);
 }
 
 function updateMotion(time) {
     if (!motion) return;
-    const { start, duration, apply, finish } = motion;
+    const { start, duration, apply, finish, ease } = motion;
     const progress = THREE.MathUtils.clamp((time - start) / duration, 0, 1);
-    apply(THREE.MathUtils.smoothstep(progress, 0, 1));
+    apply(ease(progress));
     if (progress === 1) {
         motion = null;
         finish?.();
@@ -421,7 +426,7 @@ function handleRotate(dir) {
     const quarterTurn = Math.PI / 2;
     if (renderer.xr.isPresenting) {
         let previousAngle = 0;
-        startMotion(240, progress => {
+        startMotion(500, progress => {
             const angle = dir * quarterTurn * progress;
             vr.rotateBy(angle - previousAngle);
             previousAngle = angle;
@@ -456,8 +461,15 @@ function onKeyUp(event) {
     }
 }
 
-function handleMove(dx, dy) {
-    if (!game || motion || isLoading || isLevelCompleting) return;
+function handleMove(dx, dy, allowPush = true) {
+    if (!game || motion || isLoading || isLevelCompleting) return false;
+    if (!allowPush) {
+        const nextTile = game.getTile(game.playerPos.x + dx, game.playerPos.y + dy);
+        if (nextTile !== TILE.FLOOR && nextTile !== TILE.GOAL) {
+            playSound('blocked');
+            return false;
+        }
+    }
     const result = game.tryMove(dx, dy);
     if (result.moved) {
         moveStatsHistory.push({ moves: stats.moves, pushes: stats.pushes });
@@ -479,22 +491,27 @@ function handleMove(dx, dy) {
             }
         }
 
-        animateMove(startPos, targetPos, boxMesh, boxTarget);
+        const wallAhead = game.getTile(game.playerPos.x + dx, game.playerPos.y + dy) === TILE.WALL;
+        animateMove(startPos, targetPos, boxMesh, boxTarget, wallAhead);
     } else {
         playSound('blocked');
     }
+    return result.moved;
 }
 
-function animateMove(startPos, targetPos, boxMesh, boxTarget) {
+function animateMove(startPos, targetPos, boxMesh, boxTarget, wallAhead) {
     const isVR = renderer.xr.isPresenting;
+    const brake = isVR && wallAhead;
+    // Doubling the duration lets ease-out start at normal walking speed.
+    const ease = isVR ? (p => brake ? p * (2 - p) : p) : smoothProgress;
     const boxStart = boxMesh?.position.clone();
     const position = new THREE.Vector3();
-    startMotion(260, progress => {
+    startMotion(brake ? WALK_MS * 2 : WALK_MS, progress => {
         position.lerpVectors(startPos, targetPos, progress);
         if (isVR) vr.setTile(position.x, position.y, position.z);
         else camera.position.copy(position);
         if (boxMesh) boxMesh.position.lerpVectors(boxStart, boxTarget, progress);
-    }, () => finishMove(boxMesh, boxTarget));
+    }, () => finishMove(boxMesh, boxTarget), ease);
 }
 
 function finishMove(boxMesh, boxTarget) {

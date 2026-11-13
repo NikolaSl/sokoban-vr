@@ -46,8 +46,8 @@ export function createVR(renderer, scene, camera, actions) {
 
     function updateLayoutHelp() {
         layoutHelp.textContent = rightHandOnly
-            ? 'Right stick turns · Trigger forward · Grip backward · A map · B undo · Stick click restarts'
-            : 'Left stick moves · Right stick turns · A map · B undo · X restart';
+            ? 'Right stick turns · Hold trigger to walk · Grip backward · A map · B undo · Stick click restarts'
+            : 'Hold left stick forward to walk · Right stick turns · A map · B undo · X restart';
     }
 
     renderer.xr.enabled = true;
@@ -180,7 +180,7 @@ export function createVR(renderer, scene, camera, actions) {
         const magnitude = isRight ? Math.abs(x) : Math.max(Math.abs(x), Math.abs(y));
         let state = inputStates.get(source);
         if (!state) {
-            state = { stick: true, buttons: [] };
+            state = { stick: true, buttons: [], walking: false, firstStep: false };
             inputStates.set(source, state);
         }
 
@@ -201,6 +201,16 @@ export function createVR(renderer, scene, camera, actions) {
         const triggerPressed = rightHandOnly && justPressed(0);
         const gripPressed = rightHandOnly && justPressed(1);
         const stickClicked = rightHandOnly && justPressed(3);
+        const forwardStick = y <= -STICK_PRESS && -y >= Math.abs(x);
+        const forwardHeld = isRight
+            ? rightHandOnly && state.buttons[0]
+            : y < -STICK_RELEASE && -y >= Math.abs(x);
+        const forwardPressed = isRight ? triggerPressed : stickPressed && forwardStick;
+        if (!forwardHeld) state.walking = false;
+        if (forwardPressed) {
+            state.walking = true;
+            state.firstStep = true;
+        }
         if (!actions.canPlay()) return;
 
         if (isRight) {
@@ -208,15 +218,14 @@ export function createVR(renderer, scene, camera, actions) {
             if (secondPressed) actions.undo();
             else if (stickClicked) actions.restart();
             else if (stickPressed) actions.turn(-Math.sign(x));
-            else if (triggerPressed !== gripPressed) {
-                const direction = forward.copy(getHeading());
-                if (gripPressed) direction.negate();
-                actions.move(direction);
-            }
+            else if (gripPressed && !forwardHeld) actions.move(forward.copy(getHeading()).negate());
+            else if (state.walking && !state.buttons[1]) walkForward(state);
         } else if (source.handedness === 'left') {
             if (firstPressed) {
                 actions.restart();
-            } else if (stickPressed) {
+            } else if (state.walking) {
+                walkForward(state);
+            } else if (stickPressed && !forwardStick) {
                 const direction = forward.copy(getHeading());
                 if (Math.abs(x) > Math.abs(y)) {
                     direction.applyAxisAngle(UP, -Math.sign(x) * Math.PI / 2);
@@ -226,6 +235,12 @@ export function createVR(renderer, scene, camera, actions) {
                 actions.move(direction);
             }
         }
+    }
+
+    function walkForward(state) {
+        // A fresh press can push a crate. Held input walks through empty tiles only.
+        state.walking = actions.move(getHeading(), state.firstStep);
+        state.firstStep = false;
     }
 
     function updateMap() {

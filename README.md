@@ -30,13 +30,13 @@ Choose a **Quest controls** layout before selecting **Enter VR**. The game remem
 
 | Action | Two sticks (default) | Right hand only |
 | --- | --- | --- |
-| Move one tile | Left stick in any direction | Right trigger forward, right grip backward |
-| Smooth turn 90° | Right stick left/right | Right stick left/right |
+| Move | Left stick in any direction | Right trigger forward, right grip backward |
+| Smooth turn 90° (500 ms) | Right stick left/right | Right stick left/right |
 | Toggle map | A | A |
 | Undo | B | B |
 | Restart level | X | Click the right stick |
 
-Movement is relative to where you face. Each step glides to the next tile, and crates slide when pushed. Release the input before the next step.
+Movement is relative to where you face. Hold the left stick forward or the right trigger to keep walking. Releasing finishes the current tile and stops. Walking slows as you approach a wall and stops at walls and crates. To push a crate, release forward and press it again.
 
 Start seated or standing in place. The game centers the starting view when you enter VR. Use the controller to cross tiles.
 
